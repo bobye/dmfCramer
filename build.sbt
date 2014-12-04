@@ -9,7 +9,7 @@ libraryDependencies  ++= Seq(
             // native libraries greatly improve performance, but increase jar sizes.
             "org.scalanlp" % "breeze-natives_2.10" % "0.9",
 	    // Logging
-            "org.slf4j" % "slf4j-simple" % "1.7.6",
+            "org.slf4j" % "slf4j-simple" % "1.7.6"
 )
 
 resolvers ++= Seq(
