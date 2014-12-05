@@ -2,7 +2,7 @@ package dmfCramer
 
 import breeze.linalg._
 import breeze.numerics._
-import breeze.stats.distributions.Gaussian
+import breeze.stats.distributions._
 
 /** general trait for the class of matrix factorization */
 trait MF {
@@ -21,12 +21,12 @@ class discreteMF (val dimension: Int, val size: Int, val M:CSCMatrix[Double]) ex
   val rows = M.rows
   val cols = M.cols
   // factor
-  val U = DenseMatrix.rand(size * dimension, rows, new Gaussian(0, sigma)) 
-  val V = DenseMatrix.rand(size * dimension, cols, new Gaussian(0, sigma))
+  val U = DenseMatrix.rand(dimension, rows, new Uniform(-sigma, sigma))  // DenseMatrix.rand(size * dimension, rows, new Uniform(-sigma, sigma)) 
+  val V = DenseMatrix.rand(size * dimension, cols, new Uniform(-sigma, sigma))
   
   // bias factor
-  val u0 = DenseMatrix.rand(size, rows, new Gaussian(0, sigma)) 
-  val v0 = DenseMatrix.rand(size, cols, new Gaussian(0, sigma)) 
+  //val u0 = new DenseMatrix[Double](size, rows) 
+  //val v0 = new DenseMatrix[Double](size, cols) 
   
   
   val theta: CSCMatrix[Double] = M.mapActiveValues(x => 0.0)
@@ -35,10 +35,10 @@ class discreteMF (val dimension: Int, val size: Int, val M:CSCMatrix[Double]) ex
   private def prob(i: Int, j: Int): DenseVector[Double] = {
     assert(i>=0 && i<rows && j>=0 && j<cols)
 
-    val u = U(::, i).asDenseMatrix.reshape(dimension, size)
+    val u = U(::, i)
     val v = V(::, j).asDenseMatrix.reshape(dimension, size)
-    val s = (sum((u :* v).apply(::, *)).toDenseVector += u0(::, i) += v0(::, j))
-    val p = exp(s)    
+    val s = sigmoid(sum((v(::,*) :* u).apply(::, *)).toDenseVector )  // :*= (exp(u0(::, i) + v0(::, j)))
+    val p = s // exp(s)    
     p /= (sum(p))
   }
   
@@ -52,15 +52,24 @@ class discreteMF (val dimension: Int, val size: Int, val M:CSCMatrix[Double]) ex
   
   val Y2 = Y.map(v => v :* v)
   // ** assuming score starts from 1*/
+  
+  private def project() = {
+
+    U(*, ::) -= sum(U(::, *)).toDenseVector
+    V(*, ::) -= sum(V(::, *)).toDenseVector
+  }
   private def gradient(i: Int, j: Int, score: Int) : (DenseVector[Double], DenseVector[Double], DenseVector[Double], Double) = {
-    val u = U(::, i).asDenseMatrix.reshape(dimension, size)
+    val u = U(::, i) // U(::, i).asDenseMatrix.reshape(dimension, size)
     val v = V(::, j).asDenseMatrix.reshape(dimension, size)
-    val s = (sum((u :* v).apply(::, *)).toDenseVector += u0(::, i) += v0(::, j))
-    val p = exp(s);
+    
+    val uv = (v(::, *) :* u)
+    val s = sigmoid(sum(uv(::, *)).toDenseVector)// += u0(::, i) += v0(::, j))
+    val p = s.copy //exp(s);
     p /= (sum(p))
 
     val y = Y(score)
     val y2= Y2(score)
+    
     // three Newton Raphson step
     var ratio = theta(i,j) 
     var f = sum(exp(y * ratio) :*= y :*= p)
@@ -75,49 +84,69 @@ class discreteMF (val dimension: Int, val size: Int, val M:CSCMatrix[Double]) ex
     theta(i,j) = ratio
     
     // compute gradient
-    val dp = exp(y * ratio)
-    val r = sum(dp :* p); 
+    val ey = exp(y * ratio)
+    val q = ey :* p
+       
+    val r = sum(q); 
+    q /= r
     
-    dp /= (-r) 
-    dp *= ( y * (f/df) += 1.0) *= (p - p :* p) // f should be small
+    val dp = log(q) - log(p) - 1.0 - y * ratio
+    //dp *= ( y * (f/df) += 1.0) // f should be small
+    
+    dp *=  (-p + 1.0) :*= (- s + 1.0) :*= p 
+    
+    
     val dU = V(::, j).asDenseMatrix.reshape(dimension, size, false)
-    val dV = U(::, i).asDenseMatrix.reshape(dimension, size, false)
+    val dV = new DenseMatrix[Double](dimension, size)
+    dV(::, *) := u
+
     dU(*, ::) :*= dp
     dV(*, ::) :*= dp
-    (dU.flatten(), dV.flatten(), dp, -log (r))
+    (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, -log (r))
   }
   
    def solve() : Unit = {
-    val dU = new DenseMatrix[Double](size * dimension, rows)
+    val dU = new DenseMatrix[Double](dimension, rows)
     val dV = new DenseMatrix[Double](size * dimension, cols)
-    val du0 = new DenseMatrix[Double](size, rows)
-    val dv0 = new DenseMatrix[Double](size, cols)
+//    val du0 = new DenseMatrix[Double](size, rows)
+//    val dv0 = new DenseMatrix[Double](size, cols)
+    
     var totalr: Double = 0
-    val delta = 0.1
+    var regr: Double = 0
+    val delta = 0.01
     val activeSize = M.activeSize
-    val regCoeff = 0.1
+    val regCoeff = 1/(sigma * sigma)
     for (iter <- 0 until 100) {
-      totalr = regCoeff * (sum(U :* U) + sum(V :* V) + sum(u0 :* u0) + sum(v0 :* v0)) / 2
+      // projection
+      // project() 
+      
+      totalr = 0.0
+      regr = regCoeff * (sum(U :* U) + sum(V :* V) ) / 2
       dU := 0d
       dV := 0d
-      du0 :=0d
-      dv0 :=0d
+//      du0 :=0d
+//      dv0 :=0d
       M.activeIterator.foreach
 	  {
 	      case ((i,j), s) => {
 	        val (dui, dvj, dpij, r) = gradient(i, j, s.toInt)
 	        dU(::, i) += dui
 	        dV(::, j) += dvj
-	        du0(::, i) += dpij
-	        dv0(::, j) += dpij
+//	        du0(::, i) += dpij
+//	        dv0(::, j) += dpij
 	        totalr += r
 	  }
     }
-    U -= (dU * (delta/activeSize) + U * (regCoeff * delta))
-    V -= (dV * (delta/activeSize) + V * (regCoeff * delta))
-    u0 -= (du0 * (delta/activeSize) + u0 * (regCoeff * delta))
-    v0 -= (dv0 * (delta/activeSize) + v0 * (regCoeff * delta))
-    println(iter, totalr/activeSize)
+      println(sqrt(sum(U:*U)), sqrt(sum(dU :* dU)) * delta)
+      U -= (dU *= (delta)) 
+      V -= (dV *= (delta))
+      U += (U * (regCoeff * delta))
+      V += (V * (regCoeff * delta))
+    
+    
+//    u0 -= ((du0 *= (delta)) )
+//    v0 -= ((dv0 *= (delta)) )
+    println(iter, regr/activeSize, totalr/activeSize, (regr + totalr)/activeSize)
     }
   }
 
