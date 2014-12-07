@@ -1,3 +1,18 @@
+/**
+  Discrete Martrix Factorizatin With Cramer Risk
+  Jianbo Ye (c) 2014-2015 
+  
+  Input: 
+  - A sparse matrix with values taking discrete values from 1 .. M, each row is a user, and each column is an item. 
+  - A representation dimension for user and item factors
+  
+  Output: 
+  - A probability matrix for each cell (i,j) with a nonzero probability for discrete value from 0 ... (M+1), where 0 and (M+1) are considering as the "extrame values". One can either use the expected value as predictions or rank each row using extrame values.
+  
+  Reference
+  Jianbo Ye, Top-k Probability Estimation Using Discrete Martrix Factorizatin: A Cram\"er Risk Minimization Approach (to appear)
+ */
+
 package dmfCramer
 
 import breeze.linalg._
@@ -17,18 +32,18 @@ trait MF {
   
   /** testing a new tM */
   def test(tB: List[(Int, Int, Double)]): Unit = {
-    var MSE = 0.0
-    tB.foreach(
-      x => {val err = (predict(x._1,x._2) - x._3); MSE += err * err })
-    val RMSE = sqrt(MSE/tB.length)
-    println(RMSE)
+    val RMSE = sqrt(tB.map(
+      x => {val err = (predict(x._1,x._2) - x._3); err * err }).sum / tB.length)
+    val NMAE = tB.map(
+      x => abs(predict(x._1,x._2) - x._3)).sum / tB.length
+    println(RMSE, NMAE)
     
   }
 }
 
 
 class discreteMF (val dimension: Int, val size: Int,
-  val L: List[(Int, Int, Double)]) extends MF {
+  val L: List[(Int, Int, Double)], val tL: List[(Int, Int, Double)]) extends MF {
   val sigma = 1.0
 
   val M: CSCMatrix[Double] = {
@@ -63,16 +78,19 @@ class discreteMF (val dimension: Int, val size: Int,
     s /= (sum(s))
   }
   
-  val Y = {
-    val t = (0 until size).map(i => DenseVector[Double]( (-i until (size - i)).map(_.toDouble).toArray))
-    t
-  }
-  
+  val Y = (0 until size).map(i => 
+    DenseVector[Double]( (-i until (size - i)).map(_.toDouble).toArray))
   val Y2 = Y.map(v => v :* v)
   
   // ** assuming score starts from 1*/
-  private def gradient(i: Int, j: Int, score: Int) : (DenseVector[Double], DenseVector[Double], DenseVector[Double], Double) = {
-    val u = U(::, i) // U(::, i).asDenseMatrix.reshape(dimension, size)
+  private def gradient(i: Int, j: Int, score: Int, dropout: Boolean = false) : (DenseVector[Double], DenseVector[Double], DenseVector[Double], Double) = {
+    val u = 
+      if (dropout) {
+        val dropout = I(DenseVector.rand(dimension, new Bernoulli(0.5)))
+        U(::, i) :* dropout
+      } else  
+        U(::, i) // U(::, i).asDenseMatrix.reshape(dimension, size)
+
     val v = V(::, j).asDenseMatrix.reshape(dimension, size)
     
     val s = exp(sum((v(::, *) :* u).apply(::, *)).toDenseVector += v0(::, j))
@@ -83,7 +101,7 @@ class discreteMF (val dimension: Int, val size: Int,
     val yp = y :* p
     val y2p= Y2(score) :* p
     
-    // three Newton Raphson step
+    // Newton Raphson step for ratio
     var ratio = theta(i,j) // hot-start from cached theta
     var f = sum(exp(y * ratio) :*= yp)
     var df = sum(exp(y * ratio) :*= y2p)
@@ -94,11 +112,11 @@ class discreteMF (val dimension: Int, val size: Int,
       ratio = ratio - f/df
     }
     //assert(!ratio.isNaN())
-    theta(i,j) = ratio
+    theta(i,j) = ratio // caching
     
     // compute gradient
     val ey = exp(y * ratio)
-    val q = ey :* p
+    val q = ey :*= p
     
     val r = sum(q) // risk
     q /= r
@@ -126,11 +144,11 @@ class discreteMF (val dimension: Int, val size: Int,
     val delta = 0.005 // learning rate
     val momentum = 0.9
     val activeSize = L.length
-    val regCoeff = 1.0/(sigma * sigma)
+    val regCoeff = 0.0/(sigma * sigma)
     val batchSize: Int = 10000
 
     println("epoch\treg\trisk\tloss")
-    for (iter <- 0 until 300) {
+    for (iter <- 0 until 200) {
       
       totalr = 0.0
       regr = regCoeff * (sum(U :* U) + sum(V :* V) ) / 2
@@ -142,7 +160,7 @@ class discreteMF (val dimension: Int, val size: Int,
         dv0 *=momentum
         batch.foreach{
           case (i, j, s) => {
-	    val (dui, dvj, dpij, r) = gradient(i, j, s.toInt)
+	    val (dui, dvj, dpij, r) = gradient(i, j, s.toInt, true)
 	    dU(::, i) += dui
 	    dV(::, j) += dvj
 	    //du0(::, i) += dpij
@@ -159,8 +177,12 @@ class discreteMF (val dimension: Int, val size: Int,
         //u0 -= ((du0 *= (delta)) )
         v0 -= (dv0 *= (delta))
       })
-      println(iter.toString + "\t" + (regr/activeSize).toString + "\t" +
-        (totalr/activeSize).toString + " " ((regr + totalr)/activeSize).toString )
+      println("%d\t%f\t%f\t%f".format( iter, (regr/activeSize), (totalr/activeSize),  ((regr + totalr)/activeSize) ))      
+      if (iter % 5 == 0) {
+        test(L)
+        test(tL)
+      }
+
     }
   }
 
@@ -194,12 +216,9 @@ object discreteMFrun {
   def main(argv: Array[String]): Unit = {
 
     val B = getList("train_vec.txt")
-    val dmf = new discreteMF(10, 7, B)
-    
-    dmf.solve()
-    
     val tB= getList("probe_vec.txt")
-    dmf.test(B)
-    dmf.test(tB)
+    val dmf = new discreteMF(10, 7, B, tB)
+    
+    dmf.solve()    
   }
 }
