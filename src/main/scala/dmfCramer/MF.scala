@@ -61,21 +61,28 @@ class discreteMF (val dimension: Int, val size: Int,
   /** testing a new tM */
   def test(tB: List[(Int, Int, Double)]): Unit = {
 
+    val maxV: Double = size - 2
+    val minV: Double = 1
+
     // usual measurement
-    val RMSE = sqrt(tB.map(
-      x => {val err = (predict(x._1,x._2) - x._3); err * err }).sum / tB.length)
-    val NMAE = tB.map(
-      x => abs(predict(x._1,x._2) - x._3)).sum / tB.length
+    val RMSE = sqrt(tB.map(x => {
+        val v = min(max(predict(x._1,x._2), minV), maxV)
+        val err = (v - x._3); err * err }).sum / tB.length)
+    val NMAE = tB.map(x => {
+        val v = min(max(predict(x._1,x._2), minV), maxV)
+        abs(v - x._3)}).sum / tB.length
 
     // min/max measurement
     val maxSAE = {
-      val ftB = tB.filter(_._3 == maxV).map(
-        x => x._3 - predict(x._1,x._2))
+      val ftB = tB.filter(_._3 == maxV).map(x => {
+        val v = min(max(predict(x._1,x._2), minV), maxV)
+        x._3 - v})
       ftB.sum / ftB.length
     }
     val minSAE = {
-      val ftB = tB.filter(_._3 == minV).map(
-        x => predict(x._1,x._2) - x._3)
+      val ftB = tB.filter(_._3 == 1).map(x => {
+        val v = min(max(predict(x._1,x._2), minV), maxV)
+        v - x._3})
       ftB.sum/ ftB.length
     }
 
@@ -98,10 +105,9 @@ class discreteMF (val dimension: Int, val size: Int,
   val Y2 = Y.map(v => v :* v)
   
   // ** assuming score starts from 1*/
-  private def gradient(i: Int, j: Int, score: Int, dropout: Boolean = false) : (DenseVector[Double], DenseVector[Double], DenseVector[Double], Double) = {
-    val u = 
-      if (dropout) {
-        val dropout = I(DenseVector.rand(dimension, new Bernoulli(0.5)))
+  private def gradient(i: Int, j: Int, score: Int, useDropout: Boolean = false) : (DenseVector[Double], DenseVector[Double], DenseVector[Double], Double) = {
+    val dropout = I(DenseVector.rand(dimension, new Bernoulli(0.5)))
+    val u = if (useDropout) {
         U(::, i) :* dropout
       } else  
         U(::, i) // U(::, i).asDenseMatrix.reshape(dimension, size)
@@ -145,7 +151,11 @@ class discreteMF (val dimension: Int, val size: Int,
 
     dU(*, ::) :*= dp
     dV(*, ::) :*= dp
-    (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, -log (r))
+
+    if (useDropout)
+      (sum(dU(*, ::)).toDenseVector :* dropout, dV.flatten(), dp, -log (r))
+    else
+      (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, -log (r))
   }
   
   def solve() : Unit = {
@@ -208,10 +218,7 @@ class discreteMF (val dimension: Int, val size: Int,
 
   
   val scoreVector = DenseVector[Double]((0 until size).map(_.toDouble).toArray)
-  def predict(i: Int, j: Int) = {
-    val v = prob(i,j) dot scoreVector
-    min(max(v, size - 2), 1) // bound to [min, max]
-  }
+  def predict(i: Int, j: Int) = (prob(i,j) dot scoreVector)
   
 
   
