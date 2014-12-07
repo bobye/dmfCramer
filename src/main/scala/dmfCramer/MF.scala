@@ -43,7 +43,7 @@ class discreteMF (val dimension: Int, val size: Int,
     L.foreach{case (i,j, s)=>builder.add(i, j, s)}
     builder.result()
   }
-  
+
   val rows = M.rows
   val cols = M.cols
   val theta = M.mapActiveValues(x=> 0.0)
@@ -68,10 +68,11 @@ class discreteMF (val dimension: Int, val size: Int,
         val v = min(max(predict(x._1,x._2), minV), maxV)
         val err = (v - x._3); err * err }).sum / tB.length)
     val NMAE = tB.map(x => {
-        val v = min(max(predict(x._1,x._2), minV), maxV)
-        abs(v - x._3)}).sum / tB.length
+      val v = min(max(predict(x._1,x._2), minV), maxV)
+      abs(v - x._3)}).sum / tB.length / 1.6 // 1.6 is the E[MAE] for 1..5
 
     // min/max measurement
+    /*
     val maxSAE = {
       val ftB = tB.filter(_._3 == maxV).map(x => {
         val v = min(max(predict(x._1,x._2), minV), maxV)
@@ -84,9 +85,9 @@ class discreteMF (val dimension: Int, val size: Int,
         v - x._3})
       ftB.sum/ ftB.length
     }
+     */
 
-
-    println(RMSE, NMAE, maxSAE, minSAE)
+    println(RMSE, NMAE)
   }
   
   /** compute the gradient w.r.t. the i-th column of U and j-th column of V */
@@ -162,9 +163,9 @@ class discreteMF (val dimension: Int, val size: Int,
   def solve(delta0: Double = 0.1, // initial learning rate
             momentum: Double = 0.9, //
             batchSize: Int = 10000,
-            regCoeff: Double = 0.001,
+            regCoeff: Double = 0.02,
             numOfEpoches: Int = 500,
-            useDropout: Boolean = true) : Unit = {
+            useDropout: Boolean = false) : Unit = {
     val dU = new DenseMatrix[Double](dimension, rows)
     val dV = new DenseMatrix[Double](size * dimension, cols)
     //val du0 = new DenseMatrix[Double](size, rows)

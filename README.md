@@ -3,7 +3,7 @@ Jianbo Ye (c) 2014-2015
 
 This is the experimental code for paper:
 
-Jianbo Ye, Top-k Probability Estimation Using Collaborative Filtering: A Matrix Factorization Approach, 2015 (to appear).
+Jianbo Ye, Top-k Probability Estimation Using Collaborative Filtering: A Matrix Factorization Based Insurance Model, 2015 (to appear).
 
 Input 
  - A sparse matrix with values taking discrete values from 1 .. M, each row is a user, and each column is an item. 
