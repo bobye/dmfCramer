@@ -166,7 +166,8 @@ class discreteMF (val dimension: Int, val size: Int,
     
     var totalr: Double = 0
     var regr: Double = 0
-    var delta = 0.01 // learning rate
+    val delta0 = 0.1
+    var delta = delta0 // learning rate
     val momentum = 0.9
     val activeSize = L.length
     val regCoeff = 1.0/(sigma * sigma)
@@ -177,7 +178,7 @@ class discreteMF (val dimension: Int, val size: Int,
     println("epoch\treg\trisk\tloss")
 
     for (iter <- 0 until numOfEpoches) {
-      
+      delta = (delta0 * (numOfEpoches - iter)) / numOfEpoches + 0.0001
       totalr = 0.0
       regr = if (!useDropout) regCoeff * (sum(U :* U) + sum(V :* V) ) / 2 else 0.0
       val batches = util.Random.shuffle(L).grouped(batchSize).toList // shuffling samples and grouped into batches
