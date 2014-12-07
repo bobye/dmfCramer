@@ -178,7 +178,7 @@ class discreteMF (val dimension: Int, val size: Int,
     println("epoch\treg\trisk\tloss")
 
     for (iter <- 0 until numOfEpoches) {
-      delta = (delta0 * (numOfEpoches - iter)) / numOfEpoches + 0.0001
+      delta = delta0 * scala.math.pow(0.01, iter / numOfEpoches.toDouble)
       totalr = 0.0
       regr = if (!useDropout) regCoeff * (sum(U :* U) + sum(V :* V) ) / 2 else 0.0
       val batches = util.Random.shuffle(L).grouped(batchSize).toList // shuffling samples and grouped into batches
