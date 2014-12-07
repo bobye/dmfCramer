@@ -162,7 +162,7 @@ class discreteMF (val dimension: Int, val size: Int,
   def solve(delta0: Double = 0.1, // initial learning rate
             momentum: Double = 0.9, //
             batchSize: Int = 10000,
-            regCoeff: Double = 0.000,
+            regCoeff: Double = 0.001,
             numOfEpoches: Int = 500,
             useDropout: Boolean = true) : Unit = {
     val dU = new DenseMatrix[Double](dimension, rows)
@@ -170,17 +170,16 @@ class discreteMF (val dimension: Int, val size: Int,
     //val du0 = new DenseMatrix[Double](size, rows)
     val dv0 = new DenseMatrix[Double](size, cols)
     
-    var totalr: Double = 0
-    var regr: Double = 0
-    var delta = delta0 // learning rate
+
+
     val activeSize = L.length
 
     println("epoch\treg\trisk\tloss")
 
     for (iter <- 0 until numOfEpoches) {
-      delta = delta0 * scala.math.pow(0.01, iter / numOfEpoches.toDouble)
-      totalr = 0.0
-      regr = regCoeff * (sum(U :* U) + sum(V :* V) ) / 2f
+      val delta = delta0 * scala.math.pow(0.01, iter / numOfEpoches.toDouble)
+      var totalr = 0.0
+      var regr = regCoeff * (sum(U :* U) + sum(V :* V) ) / 2f
       val batches = util.Random.shuffle(L).grouped(batchSize).toList // shuffling samples and grouped into batches
       batches.foreach(batch => {
         dU *= momentum
@@ -203,7 +202,7 @@ class discreteMF (val dimension: Int, val size: Int,
         U -= (U * (regCoeff * delta))
         V -= (V * (regCoeff * delta))
         //u0 -= ((du0 *= (delta)) )
-        //v0 -= (dv0 *= (delta))
+        v0 -= (dv0 *= (delta))
       })
       println("%d\t%f\t%f\t%f".format( iter, 
         regr/batchSize, (totalr/activeSize),  (regr/batchSize + totalr/activeSize) ))
