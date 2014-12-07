@@ -27,18 +27,8 @@ trait MF {
   val M: CSCMatrix[Double] // sparse rating matrix
   
   def solve(): Unit
-  def predict(i: Int, j: Int): Double
-  
-  
-  /** testing a new tM */
-  def test(tB: List[(Int, Int, Double)]): Unit = {
-    val RMSE = sqrt(tB.map(
-      x => {val err = (predict(x._1,x._2) - x._3); err * err }).sum / tB.length)
-    val NMAE = tB.map(
-      x => abs(predict(x._1,x._2) - x._3)).sum / tB.length
-    println(RMSE, NMAE)
-    
-  }
+  def predict(i: Int, j: Int): Double   
+
 }
 
 
@@ -66,7 +56,40 @@ class discreteMF (val dimension: Int, val size: Int,
   // bias factor
   //val u0 = new DenseMatrix[Double](size, rows)
   val v0 = new DenseMatrix[Double](size, cols)
-  
+
+
+  /** testing a new tM */
+  def test(tB: List[(Int, Int, Double)]): Unit = {
+
+    // usual measurement
+    val RMSE = sqrt(tB.map(
+      x => {
+        val v = min(max(predict(x._1,x._2), 0.0), size.toDouble)
+        val err = (v - x._3); err * err }).sum / tB.length)
+    val NMAE = tB.map(
+      x => {
+        val v = min(max(predict(x._1,x._2), 0.0), size.toDouble)
+        abs(v - x._3)}).sum / tB.length
+
+    // min/max measurement
+    val maxSAE = {
+      val ftB = tB.filter(_._3 == 5).map(
+        x => {
+          val v = min(max(predict(x._1,x._2), 0.0), size.toDouble)
+          max(x._3 - v, 0.0)})
+      ftB.sum / ftB.length
+    }
+    val minSAE = {
+      val ftB = tB.filter(_._3 == 1).map(
+        x => {
+          val v = min(max(predict(x._1,x._2), 0.0), size.toDouble)
+          max(v - x._3, 0.0)})
+      ftB.sum/ ftB.length
+    }
+
+
+    println(RMSE, NMAE, maxSAE, minSAE)
+  }
   
   /** compute the gradient w.r.t. the i-th column of U and j-th column of V */
   private def prob(i: Int, j: Int): DenseVector[Double] = {
@@ -141,14 +164,16 @@ class discreteMF (val dimension: Int, val size: Int,
     
     var totalr: Double = 0
     var regr: Double = 0
-    val delta = 0.005 // learning rate
+    var delta = 0.01 // learning rate
     val momentum = 0.9
     val activeSize = L.length
-    val regCoeff = 0.0/(sigma * sigma)
+    val regCoeff = 1.0/(sigma * sigma)
     val batchSize: Int = 10000
+    val numOfEpoches: Int = 500
 
     println("epoch\treg\trisk\tloss")
-    for (iter <- 0 until 200) {
+
+    for (iter <- 0 until numOfEpoches) {
       
       totalr = 0.0
       regr = regCoeff * (sum(U :* U) + sum(V :* V) ) / 2
@@ -160,7 +185,7 @@ class discreteMF (val dimension: Int, val size: Int,
         dv0 *=momentum
         batch.foreach{
           case (i, j, s) => {
-	    val (dui, dvj, dpij, r) = gradient(i, j, s.toInt, true)
+	    val (dui, dvj, dpij, r) = gradient(i, j, s.toInt)
 	    dU(::, i) += dui
 	    dV(::, j) += dvj
 	    //du0(::, i) += dpij
@@ -182,7 +207,7 @@ class discreteMF (val dimension: Int, val size: Int,
         test(L)
         test(tL)
       }
-
+      
     }
   }
 
