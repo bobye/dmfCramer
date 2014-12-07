@@ -16,33 +16,42 @@ trait MF {
     
   
   /** testing a new tM */
-  def test(tM: CSCMatrix[Double]): Unit = {
+  def test(tB: List[(Int, Int, Double)]): Unit = {
     var MSE = 0.0
-    tM.activeIterator.foreach
-	  {
-      case((i,j), s) => {val err = (predict(i,j) - s); MSE += err * err }
-	  }
-    val RMSE = sqrt(MSE/tM.activeSize)
+    tB.foreach(
+      x => {val err = (predict(x._1,x._2) - x._3); MSE += err * err })
+    val RMSE = sqrt(MSE/tB.length)
     println(RMSE)
     
   }
 }
 
 
-class discreteMF (val dimension: Int, val size: Int, val M:CSCMatrix[Double]) extends MF {
+class discreteMF (val dimension: Int, val size: Int, 
+				  val L: List[(Int, Int, Double)]) extends MF {
   val sigma = 1.0
+
+  val M: CSCMatrix[Double] = {
+    val r = L.maxBy(_._1)._1+1
+    val c = L.maxBy(_._2)._2+1
+    println(r, c, L.length)
+    val builder = new CSCMatrix.Builder[Double](rows = r, cols = c)
+    L.foreach{case (i,j, s)=>builder.add(i, j, s)}
+    builder.result()        
+  }
+  
   val rows = M.rows
   val cols = M.cols
+  val theta = M.mapActiveValues(x=> 0.0)
+  
   // factor
   val U = DenseMatrix.rand(dimension, rows, new Uniform(-sigma, sigma))  // DenseMatrix.rand(size * dimension, rows, new Uniform(-sigma, sigma)) 
   val V = DenseMatrix.rand(size * dimension, cols, new Uniform(-sigma, sigma))
   
   // bias factor
-  val u0 = new DenseMatrix[Double](size, rows) 
+  //val u0 = new DenseMatrix[Double](size, rows) 
   val v0 = new DenseMatrix[Double](size, cols) 
   
-  
-  val theta: CSCMatrix[Double] = M.mapActiveValues(x => 0.0)
     
   /** compute the gradient w.r.t. the i-th column of U and j-th column of V */
   private def prob(i: Int, j: Int): DenseVector[Double] = {
@@ -50,7 +59,7 @@ class discreteMF (val dimension: Int, val size: Int, val M:CSCMatrix[Double]) ex
 
     val u = U(::, i)
     val v = V(::, j).asDenseMatrix.reshape(dimension, size)
-    val s = exp(sum((v(::,*) :* u).apply(::, *)).toDenseVector += u0(::, i) += v0(::, j))  
+    val s = exp(sum((v(::,*) :* u).apply(::, *)).toDenseVector += v0(::, j))  
     s /= (sum(s))
   }
   
@@ -66,7 +75,7 @@ class discreteMF (val dimension: Int, val size: Int, val M:CSCMatrix[Double]) ex
     val u = U(::, i) // U(::, i).asDenseMatrix.reshape(dimension, size)
     val v = V(::, j).asDenseMatrix.reshape(dimension, size)
      
-    val s = exp(sum((v(::, *) :* u).apply(::, *)).toDenseVector += u0(::, i) += v0(::, j))
+    val s = exp(sum((v(::, *) :* u).apply(::, *)).toDenseVector += v0(::, j))
     val p = s.copy //exp(s);
     p /= (sum(p))
 
@@ -109,43 +118,44 @@ class discreteMF (val dimension: Int, val size: Int, val M:CSCMatrix[Double]) ex
    def solve() : Unit = {
     val dU = new DenseMatrix[Double](dimension, rows)
     val dV = new DenseMatrix[Double](size * dimension, cols)
-    val du0 = new DenseMatrix[Double](size, rows)
+    //val du0 = new DenseMatrix[Double](size, rows)
     val dv0 = new DenseMatrix[Double](size, cols)
     
     var totalr: Double = 0
     var regr: Double = 0
     val delta = 0.001
-    val activeSize = M.activeSize
+    val activeSize = L.length
     val regCoeff = 0.1/(sigma * sigma)
-    for (iter <- 0 until 500) {
+    for (iter <- 0 until 200) {
       
       totalr = 0.0
       regr = regCoeff * (sum(U :* U) + sum(V :* V) ) / 2
       dU := 0d
       dV := 0d
-      du0 :=0d
+      //du0 :=0d
       dv0 :=0d
-      M.activeIterator.foreach
-	  {
-	      case ((i,j), s) => {
+      M.activeIterator.foreach{
+        case ((i, j), s) => {
 	        val (dui, dvj, dpij, r) = gradient(i, j, s.toInt)
 	        dU(::, i) += dui
 	        dV(::, j) += dvj
-	        du0(::, i) += dpij
+	        //du0(::, i) += dpij
 	        dv0(::, j) += dpij
-	        totalr += r
-	  }
-    }
-      println(sqrt(sum(U:*U)), sqrt(sum(dU :* dU)) * delta)
+	        println(i, j, s)
+	        totalr += r        
+	      }}
+      //println(sqrt(sum(U:*U)), sqrt(sum(dU :* dU)) * delta)
       U -= (dU *= (delta)) 
-      V -= (dV *= (delta))
+      V -= (dV 
+          
+          *= (delta))
       U += (U * (regCoeff * delta))
       V += (V * (regCoeff * delta))
     
     
-    u0 -= ((du0 *= (delta)) )
-    v0 -= ((dv0 *= (delta)) )
-    println(iter, regr/activeSize, totalr/activeSize, (regr + totalr)/activeSize)
+      //u0 -= ((du0 *= (delta)) )
+      v0 -= ((dv0 *= (delta)) )
+      println(iter, regr/activeSize, totalr/activeSize, (regr + totalr)/activeSize)
     }
   }
 
@@ -159,27 +169,32 @@ class discreteMF (val dimension: Int, val size: Int, val M:CSCMatrix[Double]) ex
 
 
 object discreteMFrun {
-  def getSparseMatrix(filename: String): CSCMatrix[Double] = {
-    val builder = new CSCMatrix.Builder[Double](rows = 7000, cols = 4000)
+  def getList(filename: String): List[(Int, Int, Double)] = {
+    //val builder = new CSCMatrix.Builder[Double](rows = 7000, cols = 4000)
     import scala.io.Source._
     val source = scala.io.Source.fromFile(filename)
     val lines = source.getLines()
-    lines.foreach(s => {
+    import scala.collection.mutable.ListBuffer
+    val lb: ListBuffer[(Int, Int, Double)] = ListBuffer[(Int, Int, Double)]()
+    lines.foreach{s =>
       val elem = s.split("\\s+")
-      if (elem.size >= 4) builder.add(elem(1).toInt, elem(2).toInt, elem(3).toDouble)
-    })
+      if (elem.size>=4) 
+        lb.+=((elem(1).toInt, elem(2).toInt, elem(3).toDouble))
+    }
     source.close()
-    builder.result()    
+    lb.toList
+    //builder.result()    
   }
   
   def main(argv: Array[String]): Unit = {
 
-    val M = getSparseMatrix("train_vec.txt")
-    val dmf = new discreteMF(2, 7, M)
+    val B = getList("train_vec.txt")
+    val dmf = new discreteMF(10, 7, B)
+    
     dmf.solve()
     
-    val tM= getSparseMatrix("probe_vec.txt")
-    dmf.test(M)
-    dmf.test(tM)
+    val tB= getList("probe_vec.txt")
+    dmf.test(B)
+    dmf.test(tB)
   }
 }
