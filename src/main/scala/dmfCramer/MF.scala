@@ -1,5 +1,5 @@
 /**
-  Discrete Martrix Factorizatin With Cramer Risk
+  Discrete Martrix Factorizatin With Cramer Risk Minimization
   Jianbo Ye (c) 2014-2015 
   
   Input: 

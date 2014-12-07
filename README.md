@@ -1,13 +1,13 @@
-# Discrete Martrix Factorizatin with Cramer Risk
+# Discrete Martrix Factorizatin with Cramer Risk Minimization
 Jianbo Ye (c) 2014-2015
 
 This is the experimental code for paper:
 
-Jianbo Ye, Top-k Probability Estimation Using Discrete Martrix Factorizatin: A Cram\"er Risk Minimization Approach (to appear, 2015)
+Jianbo Ye, Top-k Probability Estimation Using Collaborative Filtering: A Matrix Factorization Approach, 2015 (to appear).
 
 Input 
  - A sparse matrix with values taking discrete values from 1 .. M, each row is a user, and each column is an item. 
- - A representation dimension for user and item factors
+ - A representation dimension for user and item factors (default: 10)
   
 Output: 
  - A probability matrix for each cell (i,j) with a nonzero probability for discrete value from 0 ... (M+1), where 0 and (M+1) are considering as the "extrame values". One can either use the expected value as predictions or rank each row using extrame values.
