@@ -25,8 +25,7 @@ trait MF {
   val dimension: Int
   val rows, cols: Int
   val M: CSCMatrix[Double] // sparse rating matrix
-  
-  def solve(): Unit
+ 
   def predict(i: Int, j: Int): Double   
 
 }
@@ -106,11 +105,13 @@ class discreteMF (val dimension: Int, val size: Int,
   
   // ** assuming score starts from 1*/
   private def gradient(i: Int, j: Int, score: Int, useDropout: Boolean = false) : (DenseVector[Double], DenseVector[Double], DenseVector[Double], Double) = {
-    val dropout = I(DenseVector.rand(dimension, new Bernoulli(0.5)))
+    val dropout = if (useDropout) {
+      I(DenseVector.rand(dimension, new Bernoulli(0.5)))
+    } else null
+
     val u = if (useDropout) {
-        U(::, i) :* dropout
-      } else  
-        U(::, i) // U(::, i).asDenseMatrix.reshape(dimension, size)
+      U(::, i) :* dropout
+    } else U(::, i) // U(::, i).asDenseMatrix.reshape(dimension, size)
 
     val v = V(::, j).asDenseMatrix.reshape(dimension, size)
     
@@ -158,7 +159,12 @@ class discreteMF (val dimension: Int, val size: Int,
       (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, -log (r))
   }
   
-  def solve() : Unit = {
+  def solve(delta0: Double = 0.1, // initial learning rate
+            momentum: Double = 0.9, //
+            batchSize: Int = 10000,
+            regCoeff: Double = 0.001,
+            numOfEpoches: Int = 500,
+            useDropout: Boolean = true) : Unit = {
     val dU = new DenseMatrix[Double](dimension, rows)
     val dV = new DenseMatrix[Double](size * dimension, cols)
     //val du0 = new DenseMatrix[Double](size, rows)
@@ -166,14 +172,8 @@ class discreteMF (val dimension: Int, val size: Int,
     
     var totalr: Double = 0
     var regr: Double = 0
-    val delta0 = 0.1
     var delta = delta0 // learning rate
-    val momentum = 0.9
     val activeSize = L.length
-    val regCoeff = 1.0/(sigma * sigma)
-    val batchSize: Int = 10000
-    val numOfEpoches: Int = 500
-    val useDropout = true
 
     println("epoch\treg\trisk\tloss")
 
@@ -200,15 +200,13 @@ class discreteMF (val dimension: Int, val size: Int,
         //println(sqrt(sum(U:*U)), sqrt(sum(dU :* dU)) * delta)
         U -= (dU *= (delta))
         V -= (dV *= (delta))
-
-        if (!useDropout) {
-          U -= (U * (regCoeff * delta))
-          V -= (V * (regCoeff * delta))
-        }
+        U -= (U * (regCoeff * delta))
+        V -= (V * (regCoeff * delta))
         //u0 -= ((du0 *= (delta)) )
-        v0 -= (dv0 *= (delta))
+        //v0 -= (dv0 *= (delta))
       })
-      println("%d\t%f\t%f\t%f".format( iter, (regr/activeSize), (totalr/activeSize),  ((regr + totalr)/activeSize) ))      
+      println("%d\t%f\t%f\t%f".format( iter, 
+        regr/batchSize, (totalr/activeSize),  (regr/batchSize + totalr/activeSize) ))
       if (iter % 5 == 0) {
         test(L)
         test(tL)
