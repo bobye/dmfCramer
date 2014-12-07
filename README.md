@@ -1,4 +1,4 @@
-# Discrete Martrix Factorizatin With Cramer Risk
+# Discrete Martrix Factorizatin with Cramer Risk
 Jianbo Ye (c) 2014-2015
 
 This is the experimental code for paper:
@@ -14,3 +14,5 @@ Output:
  - For each item j, the estimation of its Top-k probability in the preference list of user i can vbe computed. 
 
 
+## Reference
+ - Dataset: http://grouplens.org/datasets/movielens/

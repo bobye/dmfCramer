@@ -63,27 +63,19 @@ class discreteMF (val dimension: Int, val size: Int,
 
     // usual measurement
     val RMSE = sqrt(tB.map(
-      x => {
-        val v = min(max(predict(x._1,x._2), 0.0), size.toDouble)
-        val err = (v - x._3); err * err }).sum / tB.length)
+      x => {val err = (predict(x._1,x._2) - x._3); err * err }).sum / tB.length)
     val NMAE = tB.map(
-      x => {
-        val v = min(max(predict(x._1,x._2), 0.0), size.toDouble)
-        abs(v - x._3)}).sum / tB.length
+      x => abs(predict(x._1,x._2) - x._3)).sum / tB.length
 
     // min/max measurement
     val maxSAE = {
-      val ftB = tB.filter(_._3 == 5).map(
-        x => {
-          val v = min(max(predict(x._1,x._2), 0.0), size.toDouble)
-          max(x._3 - v, 0.0)})
+      val ftB = tB.filter(_._3 == maxV).map(
+        x => x._3 - predict(x._1,x._2))
       ftB.sum / ftB.length
     }
     val minSAE = {
-      val ftB = tB.filter(_._3 == 1).map(
-        x => {
-          val v = min(max(predict(x._1,x._2), 0.0), size.toDouble)
-          max(v - x._3, 0.0)})
+      val ftB = tB.filter(_._3 == minV).map(
+        x => predict(x._1,x._2) - x._3)
       ftB.sum/ ftB.length
     }
 
@@ -170,13 +162,14 @@ class discreteMF (val dimension: Int, val size: Int,
     val regCoeff = 1.0/(sigma * sigma)
     val batchSize: Int = 10000
     val numOfEpoches: Int = 500
+    val useDropout = true
 
     println("epoch\treg\trisk\tloss")
 
     for (iter <- 0 until numOfEpoches) {
       
       totalr = 0.0
-      regr = regCoeff * (sum(U :* U) + sum(V :* V) ) / 2
+      regr = if (!useDropout) regCoeff * (sum(U :* U) + sum(V :* V) ) / 2 else 0.0
       val batches = util.Random.shuffle(L).grouped(batchSize).toList // shuffling samples and grouped into batches
       batches.foreach(batch => {
         dU *= momentum
@@ -185,7 +178,7 @@ class discreteMF (val dimension: Int, val size: Int,
         dv0 *=momentum
         batch.foreach{
           case (i, j, s) => {
-	    val (dui, dvj, dpij, r) = gradient(i, j, s.toInt)
+	    val (dui, dvj, dpij, r) = gradient(i, j, s.toInt, useDropout)
 	    dU(::, i) += dui
 	    dV(::, j) += dvj
 	    //du0(::, i) += dpij
@@ -196,9 +189,11 @@ class discreteMF (val dimension: Int, val size: Int,
         //println(sqrt(sum(U:*U)), sqrt(sum(dU :* dU)) * delta)
         U -= (dU *= (delta))
         V -= (dV *= (delta))
-        U -= (U * (regCoeff * delta))
-        V -= (V * (regCoeff * delta))
-        
+
+        if (!useDropout) {
+          U -= (U * (regCoeff * delta))
+          V -= (V * (regCoeff * delta))
+        }
         //u0 -= ((du0 *= (delta)) )
         v0 -= (dv0 *= (delta))
       })
@@ -213,7 +208,10 @@ class discreteMF (val dimension: Int, val size: Int,
 
   
   val scoreVector = DenseVector[Double]((0 until size).map(_.toDouble).toArray)
-  def predict(i: Int, j: Int) = (prob(i,j) dot scoreVector)
+  def predict(i: Int, j: Int) = {
+    val v = prob(i,j) dot scoreVector
+    min(max(v, size - 2), 1) // bound to [min, max]
+  }
   
 
   
