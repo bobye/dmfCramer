@@ -146,7 +146,8 @@ class discreteMF (val dimension: Int, val size: Int,
     val r = sum(q) // risk
     q /= r
     
-    val dp = p -= q
+    val lambda: Double = 0.001
+    val dp = (p - q) + (p - 1.0) * lambda
     
     
     val dU = V(::, j).asDenseMatrix.reshape(dimension, size, false)
@@ -157,16 +158,16 @@ class discreteMF (val dimension: Int, val size: Int,
     dV(*, ::) :*= dp
 
     if (useDropout)
-      (sum(dU(*, ::)).toDenseVector :* dropout, dV.flatten(), dp, -log (r))
+      (sum(dU(*, ::)).toDenseVector :* dropout, dV.flatten(), dp, -log (r) - lambda * sum(log(p)))
     else
-      (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, -log (r))
+      (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, -log (r) - lambda * sum(log(p)))
   }
   
   def solve(delta0: Double = 0.1, // initial learning rate
             momentum: Double = 0.9, //
             batchSize: Int = 10000,
-            regCoeff: Double = 0.02,
-            numOfEpoches: Int = 500,
+            regCoeff: Double = 0.00,
+            numOfEpoches: Int = 50,
             useDropout: Boolean = false) : Unit = {
     val dU = new DenseMatrix[Double](dimension, rows)
     val dV = new DenseMatrix[Double](size * dimension, cols)
@@ -182,7 +183,7 @@ class discreteMF (val dimension: Int, val size: Int,
     for (iter <- 0 until numOfEpoches) {
       val delta = delta0 * scala.math.pow(0.01, iter / numOfEpoches.toDouble)
       var totalr = 0.0
-      var regr = regCoeff * (sum(U :* U) + sum(V :* V) ) / 2f
+      var regr = 0.0 // regCoeff * (sum(U :* U) + sum(V :* V) ) / 2f
       val batches = util.Random.shuffle(L).grouped(batchSize).toList // shuffling samples and grouped into batches
       batches.foreach(batch => {
         dU *= momentum
@@ -254,8 +255,8 @@ class discreteMF (val dimension: Int, val size: Int,
     val p = exp(sum((v(::,*) :* u).apply(::, *)).toDenseVector += v0(::, j))
     p /= (sum(p))
     val p1 = p(cutoff until size).sum
-//    val theta = log(((1 - p1) * (1-value)) / (p1 * value))
-    val q1 = p1 / (p1 + (1 - p1) * exp( - theta) )
+    // val theta = log(((1 - p1) * (1-value)) / (p1 * value))
+    val q1 = p1 / (p1 + (1 - p1) * exp(theta) )
     val sample = I(new Bernoulli(q1).draw())
     (sample.toInt, log (p1 + (1 - p1)* exp(- theta)))
   }
@@ -266,17 +267,22 @@ class discreteMF (val dimension: Int, val size: Int,
     val N = itemList.length
     
     // Importance sampling to estimate L_{m} and L_{m-1}
-    val sampleSize = 100
+    val sampleSize = 1000
     val pA = itemList.map(prob(user, _)(size - 1)).sum / N
     val pB = pA + itemList.map(prob(user, _)(size - 2)).sum / N
     val value: Double = k.toDouble / N.toDouble
-    val theta = log (pA * (1 - value) / ( (1 - pA) * value)) // rescale
+    val theta = 0.77 * log ((1 - pA) * (1 - value) / ( pA * value)) // rescale
     val eA = for (i<- 0 until sampleSize) yield {
-      val trials = itemList.map(probQ(user, _, value, size-1)); 
-      (trials.foldLeft[Int](0)(_ + _._1), trials.foldLeft(0.0)(_ + _._2)) 
+      val trials = itemList.map(probQ(user, _, theta, size-1)); 
+      trials.foldLeft[Int](0)(_ + _._1) 
     }
-    println(pA, pB, theta)
-    println(eA)
+    
+    val eB = for (i<- 0 until sampleSize) yield {
+      val trials = itemList.map(probQ(user, _, theta, size-2)); 
+      trials.foldLeft[Int](0)(_ + _._1)
+    }    
+    println((pA, theta), (pB, theta))
+    println(eA.filter(_ < k).length, eB.filter(_ < k).length)
     
     itemList.sortBy(scores(_))
   }
@@ -306,15 +312,15 @@ object discreteMFrun {
     val B = getList("train_vec.txt")
     val tB= getList("probe_vec.txt")
     val dmf = new discreteMF(10, 7, B, tB)
-    
+    /*
     dmf.solve()    
     dmf.save("DPMF.mat")
-        
-    /*
+    */    
+    
     dmf.load("DPMF.mat")
     dmf.test(tB)
     
-    dmf.topk(30, 200)
-    */
+    dmf.topk(30, 10)
+    
   }
 }
