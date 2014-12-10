@@ -100,6 +100,8 @@ class discreteMF (val dimension: Int, val size: Int,
     s /= (sum(s))
   }
   
+
+  
   val Y = (0 until size).map(i => 
     DenseVector[Double]( (-i until (size - i)).map(_.toDouble).toArray))
   val Y2 = Y.map(v => v :* v)
@@ -107,7 +109,7 @@ class discreteMF (val dimension: Int, val size: Int,
   // ** assuming score starts from 1*/
   private def gradient(i: Int, j: Int, score: Int, useDropout: Boolean = false) : (DenseVector[Double], DenseVector[Double], DenseVector[Double], Double) = {
     val dropout = if (useDropout) {
-      I(DenseVector.rand(dimension, new Bernoulli(0.5)))
+      I(DenseVector.rand(dimension, new Bernoulli(0.9)))
     } else null
 
     val u = if (useDropout) {
@@ -187,7 +189,7 @@ class discreteMF (val dimension: Int, val size: Int,
         dV *= momentum
         //du0 :=0d
         dv0 *=momentum
-        batch.foreach{
+        totalr += batch.par.map{
           case (i, j, s) => {
 	    val (dui, dvj, dpij, r) = gradient(i, j, s.toInt, useDropout)
 	    dU(::, i) += dui
@@ -195,8 +197,8 @@ class discreteMF (val dimension: Int, val size: Int,
 	    //du0(::, i) += dpij
 	    dv0(::, j) += dpij
 	    //println(i, j, s)
-	    totalr += r
-	  }}
+	    r
+	    }}.reduce(_+_)
         //println(sqrt(sum(U:*U)), sqrt(sum(dU :* dU)) * delta)
         U -= (dU *= (delta))
         V -= (dV *= (delta))
@@ -219,8 +221,65 @@ class discreteMF (val dimension: Int, val size: Int,
   val scoreVector = DenseVector[Double]((0 until size).map(_.toDouble).toArray)
   def predict(i: Int, j: Int) = (prob(i,j) dot scoreVector)
   
-
   
+  def save(filename: String): Unit = {
+    import com.jmatio.io._
+    import com.jmatio.types._
+    import java.util.ArrayList
+    
+    val list = new ArrayList[MLArray]()
+    list.add(new MLDouble("U", U.t.flatten(false).data, U.cols))
+    list.add(new MLDouble("V", V.t.flatten(false).data, V.cols))
+    list.add(new MLDouble("v0", v0.t.flatten(false).data, v0.cols))
+    new MatFileWriter(filename, list)       
+  }
+  
+  def load(filename: String): Unit = {
+    import com.jmatio.io.MatFileReader
+    import com.jmatio.types._
+    import java.util.ArrayList    
+    implicit def wrapDoubleArray(arr: Array[Array[Double]]): Array[Double] = arr.flatMap(x => x)
+    val mfr = new MatFileReader( filename )
+    val Us: DenseMatrix[Double] =  new DenseMatrix(U.rows, U.cols, mfr.getMLArray("U").asInstanceOf[MLDouble].getArray())
+    val Vs: DenseMatrix[Double] =  new DenseMatrix(V.rows, V.cols, mfr.getMLArray("V").asInstanceOf[MLDouble].getArray())
+    val v0s: DenseMatrix[Double] =  new DenseMatrix(v0.rows,v0.cols, mfr.getMLArray("v0").asInstanceOf[MLDouble].getArray())
+    U := Us
+    V := Vs
+    v0 := v0s
+  }
+
+  private def probQ(i: Int, j: Int, theta: Double, cutoff: Int): (Int, Double) = {
+    val u = U(::, i)
+    val v = V(::, j).asDenseMatrix.reshape(dimension, size)
+    val p = exp(sum((v(::,*) :* u).apply(::, *)).toDenseVector += v0(::, j))
+    p /= (sum(p))
+    val p1 = p(cutoff until size).sum
+//    val theta = log(((1 - p1) * (1-value)) / (p1 * value))
+    val q1 = p1 / (p1 + (1 - p1) * exp( - theta) )
+    val sample = I(new Bernoulli(q1).draw())
+    (sample.toInt, log (p1 + (1 - p1)* exp(- theta)))
+  }
+  // sort itemList based on its top k probability
+  def topk(user: Int, k: Int, itemList: IndexedSeq[Int] = (1 until V.cols)): IndexedSeq[Int] = {
+    assert(user < rows)
+    val scores = IndexedSeq.fill[Double](cols)(0)
+    val N = itemList.length
+    
+    // Importance sampling to estimate L_{m} and L_{m-1}
+    val sampleSize = 100
+    val pA = itemList.map(prob(user, _)(size - 1)).sum / N
+    val pB = pA + itemList.map(prob(user, _)(size - 2)).sum / N
+    val value: Double = k.toDouble / N.toDouble
+    val theta = log (pA * (1 - value) / ( (1 - pA) * value)) // rescale
+    val eA = for (i<- 0 until sampleSize) yield {
+      val trials = itemList.map(probQ(user, _, value, size-1)); 
+      (trials.foldLeft[Int](0)(_ + _._1), trials.foldLeft(0.0)(_ + _._2)) 
+    }
+    println(pA, pB, theta)
+    println(eA)
+    
+    itemList.sortBy(scores(_))
+  }
 }
 
 
@@ -249,5 +308,13 @@ object discreteMFrun {
     val dmf = new discreteMF(10, 7, B, tB)
     
     dmf.solve()    
+    dmf.save("DPMF.mat")
+        
+    /*
+    dmf.load("DPMF.mat")
+    dmf.test(tB)
+    
+    dmf.topk(30, 200)
+    */
   }
 }
