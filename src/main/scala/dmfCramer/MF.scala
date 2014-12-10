@@ -35,13 +35,19 @@ class discreteMF (val dimension: Int, val size: Int,
   val L: List[(Int, Int, Double)], val tL: List[(Int, Int, Double)]) extends MF {
   val sigma = 1.0
 
+  
+  val dirichlet = DenseVector.zeros[Double](size)
   val M: CSCMatrix[Double] = {
     val r = L.maxBy(_._1)._1+1
     val c = L.maxBy(_._2)._2+1
     println(r, c, L.length)
     val builder = new CSCMatrix.Builder[Double](rows = r, cols = c)
-    L.foreach{case (i,j, s)=>builder.add(i, j, s)}
-    builder.result()
+    L.foreach{case (i,j, s)=>{
+      builder.add(i, j, s)
+      dirichlet(s.toInt) = dirichlet(s.toInt) + 1
+    }}
+    (dirichlet -= 1.0) /= (L.length.toDouble / size)
+    builder.result()    
   }
 
   val rows = M.rows
@@ -146,8 +152,8 @@ class discreteMF (val dimension: Int, val size: Int,
     val r = sum(q) // risk
     q /= r
     
-    val lambda: Double = 0.001
-    val dp = (p - q) + (p - 1.0) * lambda
+    val diri = dirichlet * 0.001
+    val dp = (p - q) += ((p - 1.0) *= diri)
     
     
     val dU = V(::, j).asDenseMatrix.reshape(dimension, size, false)
@@ -158,9 +164,9 @@ class discreteMF (val dimension: Int, val size: Int,
     dV(*, ::) :*= dp
 
     if (useDropout)
-      (sum(dU(*, ::)).toDenseVector :* dropout, dV.flatten(), dp, -log (r) - lambda * sum(log(p)))
+      (sum(dU(*, ::)).toDenseVector :* dropout, dV.flatten(), dp, -log (r) - sum(log(p) :*= diri))
     else
-      (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, -log (r) - lambda * sum(log(p)))
+      (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, -log (r) - sum(log(p) :*= diri))
   }
   
   def solve(delta0: Double = 0.1, // initial learning rate
@@ -312,15 +318,15 @@ object discreteMFrun {
     val B = getList("train_vec.txt")
     val tB= getList("probe_vec.txt")
     val dmf = new discreteMF(10, 7, B, tB)
-    /*
-    dmf.solve()    
-    dmf.save("DPMF.mat")
-    */    
     
+    dmf.solve()    
+    dmf.save("DPMF.mat")    
+    
+    /*
     dmf.load("DPMF.mat")
     dmf.test(tB)
     
     dmf.topk(30, 10)
-    
+    */
   }
 }
