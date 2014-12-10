@@ -152,7 +152,7 @@ class discreteMF (val dimension: Int, val size: Int,
     val r = sum(q) // risk
     q /= r
     
-    val diri = dirichlet * 0.002
+    val diri = dirichlet * 0.001
     val dp = (p - q) += ((p - 1.0) *= diri)
     
     
@@ -313,7 +313,7 @@ object discreteMFrun {
     lines.foreach{s =>
       val elem = s.split("\\s+")
       if (elem.size>=4)
-        lb.+=((elem(1).toInt, elem(2).toInt, elem(3).toDouble + 1))
+        lb.+=((elem(1).toInt, elem(2).toInt, elem(3).toDouble))
     }
     source.close()
     lb.toList
@@ -324,7 +324,7 @@ object discreteMFrun {
 
     val B = getList("train_vec.txt")
     val tB= getList("probe_vec.txt")
-    val dmf = new discreteMF(10, 9, B, tB)
+    val dmf = new discreteMF(10, 7, B, tB)
     
     dmf.solve()    
     dmf.save("DPMF.mat")    
