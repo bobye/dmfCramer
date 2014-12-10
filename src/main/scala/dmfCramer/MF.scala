@@ -152,7 +152,7 @@ class discreteMF (val dimension: Int, val size: Int,
     val r = sum(q) // risk
     q /= r
     
-    val diri = dirichlet * 0.001
+    val diri = dirichlet * 0.002
     val dp = (p - q) += ((p - 1.0) *= diri)
     
     
@@ -226,7 +226,9 @@ class discreteMF (val dimension: Int, val size: Int,
 
   
   val scoreVector = DenseVector[Double]((0 until size).map(_.toDouble).toArray)
-  def predict(i: Int, j: Int) = (prob(i,j) dot scoreVector)
+  def predict(i: Int, j: Int) = {
+    (prob(i,j) dot scoreVector)
+  }
   
   
   def save(filename: String): Unit = {
@@ -264,7 +266,7 @@ class discreteMF (val dimension: Int, val size: Int,
     // val theta = log(((1 - p1) * (1-value)) / (p1 * value))
     val q1 = p1 / (p1 + (1 - p1) * exp(theta) )
     val sample = I(new Bernoulli(q1).draw())
-    (sample.toInt, log (p1 + (1 - p1)* exp(- theta)))
+    (sample.toInt, log (p1 + (1 - p1)* exp(theta)))
   }
   // sort itemList based on its top k probability
   def topk(user: Int, k: Int, itemList: IndexedSeq[Int] = (1 until V.cols)): IndexedSeq[Int] = {
@@ -277,18 +279,23 @@ class discreteMF (val dimension: Int, val size: Int,
     val pA = itemList.map(prob(user, _)(size - 1)).sum / N
     val pB = pA + itemList.map(prob(user, _)(size - 2)).sum / N
     val value: Double = k.toDouble / N.toDouble
-    val theta = 0.77 * log ((1 - pA) * (1 - value) / ( pA * value)) // rescale
+    val thetaA = 0.8 * log ((1 - pA) * (1 - value) / ( pA * value)) // rescale
+    val thetaB = thetaA // 0.9 * log ((1 - pB) * (1 - value) / ( pB * value)) // rescale
+    
     val eA = for (i<- 0 until sampleSize) yield {
-      val trials = itemList.map(probQ(user, _, theta, size-1)); 
-      trials.foldLeft[Int](0)(_ + _._1) 
+      val trials = itemList.map(probQ(user, _, thetaA, size-1)); 
+      (trials.foldLeft[Int](0)(_ + _._1), trials.foldLeft[Double](0)(_ + _._2))
     }
     
     val eB = for (i<- 0 until sampleSize) yield {
-      val trials = itemList.map(probQ(user, _, theta, size-2)); 
-      trials.foldLeft[Int](0)(_ + _._1)
+      val trials = itemList.map(probQ(user, _, thetaB, size-2)); 
+      (trials.foldLeft[Int](0)(_ + _._1), trials.foldLeft[Double](0)(_ + _._2))
     }    
-    println((pA, theta), (pB, theta))
-    println(eA.filter(_ < k).length, eB.filter(_ < k).length)
+    println((pA, thetaA), (pB, thetaB))
+    
+    val countA = eA.filter(_._1 <= k).length
+    val countB = eB.filter(_._1 <= k).length 
+    println(countA, countB, - eA(0)._2 + eB(0)._2)
     
     itemList.sortBy(scores(_))
   }
@@ -306,7 +313,7 @@ object discreteMFrun {
     lines.foreach{s =>
       val elem = s.split("\\s+")
       if (elem.size>=4)
-        lb.+=((elem(1).toInt, elem(2).toInt, elem(3).toDouble))
+        lb.+=((elem(1).toInt, elem(2).toInt, elem(3).toDouble + 1))
     }
     source.close()
     lb.toList
@@ -317,16 +324,16 @@ object discreteMFrun {
 
     val B = getList("train_vec.txt")
     val tB= getList("probe_vec.txt")
-    val dmf = new discreteMF(10, 7, B, tB)
+    val dmf = new discreteMF(10, 9, B, tB)
     
     dmf.solve()    
     dmf.save("DPMF.mat")    
     
-    /*
+    
     dmf.load("DPMF.mat")
     dmf.test(tB)
     
     dmf.topk(30, 10)
-    */
+    
   }
 }
