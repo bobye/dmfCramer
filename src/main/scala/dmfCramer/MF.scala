@@ -8,9 +8,6 @@
   
   Output: 
   - A probability matrix for each cell (i,j) with a nonzero probability for discrete value from 0 ... (M+1), where 0 and (M+1) are considering as the "extrame values". One can either use the expected value as predictions or rank each row using extrame values.
-  
-  Reference
-  Jianbo Ye, Top-k Probability Estimation Using Discrete Martrix Factorizatin: A Cram\"er Risk Minimization Approach (to appear)
  */
 
 package dmfCramer
@@ -46,7 +43,7 @@ class discreteMF (val dimension: Int, val size: Int,
       builder.add(i, j, s)
       dirichlet(s.toInt) = dirichlet(s.toInt) + 1
     }}
-    (dirichlet -= 1.0) /= (L.length.toDouble / size)
+    (dirichlet -= 1.0) /= (L.length.toDouble / size) *= 0.0001
     builder.result()    
   }
 
@@ -59,7 +56,7 @@ class discreteMF (val dimension: Int, val size: Int,
   val V = DenseMatrix.rand(size * dimension, cols, new Uniform(-sigma, sigma))
   
   // bias factor
-  //val u0 = new DenseMatrix[Double](size, rows)
+  // val u0 = new DenseMatrix[Double](size, rows)
   val v0 = new DenseMatrix[Double](size, cols)
 
 
@@ -76,22 +73,6 @@ class discreteMF (val dimension: Int, val size: Int,
     val NMAE = tB.map(x => {
       val v = min(max(predict(x._1,x._2), minV), maxV)
       abs(v - x._3)}).sum / tB.length / 1.6 // 1.6 is the E[MAE] for 1..5
-
-    // min/max measurement
-    /*
-    val maxSAE = {
-      val ftB = tB.filter(_._3 == maxV).map(x => {
-        val v = min(max(predict(x._1,x._2), minV), maxV)
-        x._3 - v})
-      ftB.sum / ftB.length
-    }
-    val minSAE = {
-      val ftB = tB.filter(_._3 == 1).map(x => {
-        val v = min(max(predict(x._1,x._2), minV), maxV)
-        v - x._3})
-      ftB.sum/ ftB.length
-    }
-     */
 
     println(RMSE, NMAE)
   }
@@ -111,9 +92,11 @@ class discreteMF (val dimension: Int, val size: Int,
   val Y = (0 until size).map(i => 
     DenseVector[Double]( (-i until (size - i)).map(_.toDouble).toArray))
   val Y2 = Y.map(v => v :* v)
+  val Y2c = Y2.map( v => {v - v.sum / size})
   
   // ** assuming score starts from 1*/
-  private def gradient(i: Int, j: Int, score: Int, useDropout: Boolean = false) : (DenseVector[Double], DenseVector[Double], DenseVector[Double], Double) = {
+  private def gradient(i: Int, j: Int, score: Int, useDropout: Boolean = false) : 
+	  (DenseVector[Double], DenseVector[Double], DenseVector[Double], (Double,Double,Double)) = {
     val dropout = if (useDropout) {
       I(DenseVector.rand(dimension, new Bernoulli(0.9)))
     } else null
@@ -152,8 +135,8 @@ class discreteMF (val dimension: Int, val size: Int,
     val r = sum(q) // risk
     q /= r
     
-    val diri = dirichlet * 0.001
-    val dp = (p - q) += ((p - 1.0) *= diri)
+    val coeff = 1.0
+    val dp = (p - q) // += ((p - 1.0) *= dirichlet) -= ((p - 1.0) :*= Y2c(score) :* coeff :*= p)
     
     
     val dU = V(::, j).asDenseMatrix.reshape(dimension, size, false)
@@ -163,17 +146,21 @@ class discreteMF (val dimension: Int, val size: Int,
     dU(*, ::) :*= dp
     dV(*, ::) :*= dp
 
+    
+    val obj1 = -log (r) 
+    val obj2 = 0.0 //- sum(log(p) :*= dirichlet) 
+    val obj3 = 0.0 // sum(p :* Y2(score)) * coeff
     if (useDropout)
-      (sum(dU(*, ::)).toDenseVector :* dropout, dV.flatten(), dp, -log (r) - sum(log(p) :*= diri))
+      (sum(dU(*, ::)).toDenseVector :* dropout, dV.flatten(), dp, (obj1, obj2, obj3))
     else
-      (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, -log (r) - sum(log(p) :*= diri))
+      (sum(dU(*, ::)).toDenseVector, dV.flatten(), dp, (obj1, obj2, obj3))
   }
   
   def solve(delta0: Double = 0.1, // initial learning rate
             momentum: Double = 0.9, //
             batchSize: Int = 10000,
-            regCoeff: Double = 0.00,
-            numOfEpoches: Int = 50,
+            regCoeff: Double = 0.02,
+            numOfEpoches: Int = 500,
             useDropout: Boolean = false) : Unit = {
     val dU = new DenseMatrix[Double](dimension, rows)
     val dV = new DenseMatrix[Double](size * dimension, cols)
@@ -184,19 +171,21 @@ class discreteMF (val dimension: Int, val size: Int,
 
     val activeSize = L.length
 
-    println("epoch\treg\trisk\tloss")
+    println("epoch\treg1\treg2\trisk\tloss")
 
     for (iter <- 0 until numOfEpoches) {
       val delta = delta0 * scala.math.pow(0.01, iter / numOfEpoches.toDouble)
-      var totalr = 0.0
-      var regr = 0.0 // regCoeff * (sum(U :* U) + sum(V :* V) ) / 2f
+      var totalr1 = 0.0
+      var totalr2 = 0.0
+      var regr1 = regCoeff * (sum(U :* U) + sum(V :* V) ) / 2f
+      var regr2 = 0.0
       val batches = util.Random.shuffle(L).grouped(batchSize).toList // shuffling samples and grouped into batches
       batches.foreach(batch => {
         dU *= momentum
         dV *= momentum
         //du0 :=0d
         dv0 *=momentum
-        totalr += batch.par.map{
+        val totalR = batch.par.map{
           case (i, j, s) => {
 	    val (dui, dvj, dpij, r) = gradient(i, j, s.toInt, useDropout)
 	    dU(::, i) += dui
@@ -205,7 +194,10 @@ class discreteMF (val dimension: Int, val size: Int,
 	    dv0(::, j) += dpij
 	    //println(i, j, s)
 	    r
-	    }}.reduce(_+_)
+	    }}.reduce((a, b) => (a._1+b._1, a._2+b._2, a._3+b._3))
+	    totalr1 += totalR._1
+	    totalr2 += totalR._3
+	    regr2 += totalR._2
         //println(sqrt(sum(U:*U)), sqrt(sum(dU :* dU)) * delta)
         U -= (dU *= (delta))
         V -= (dV *= (delta))
@@ -214,8 +206,8 @@ class discreteMF (val dimension: Int, val size: Int,
         //u0 -= ((du0 *= (delta)) )
         v0 -= (dv0 *= (delta))
       })
-      println("%d\t%f\t%f\t%f".format( iter, 
-        regr/batchSize, (totalr/activeSize),  (regr/batchSize + totalr/activeSize) ))
+      println("%d\t%f\t%f\t%f\t%f".format( iter, regr1 / batchSize,
+        regr2/activeSize, (totalr1/activeSize),  (totalr2/activeSize) ))
       if (iter % 5 == 0) {
         test(L)
         test(tL)
@@ -239,6 +231,7 @@ class discreteMF (val dimension: Int, val size: Int,
     val list = new ArrayList[MLArray]()
     list.add(new MLDouble("U", U.t.flatten(false).data, U.cols))
     list.add(new MLDouble("V", V.t.flatten(false).data, V.cols))
+    //list.add(new MLDouble("u0", u0.t.flatten(false).data, u0.cols))
     list.add(new MLDouble("v0", v0.t.flatten(false).data, v0.cols))
     new MatFileWriter(filename, list)       
   }
@@ -251,10 +244,36 @@ class discreteMF (val dimension: Int, val size: Int,
     val mfr = new MatFileReader( filename )
     val Us: DenseMatrix[Double] =  new DenseMatrix(U.rows, U.cols, mfr.getMLArray("U").asInstanceOf[MLDouble].getArray())
     val Vs: DenseMatrix[Double] =  new DenseMatrix(V.rows, V.cols, mfr.getMLArray("V").asInstanceOf[MLDouble].getArray())
+    //val u0s: DenseMatrix[Double] =  new DenseMatrix(u0.rows,u0.cols, mfr.getMLArray("u0").asInstanceOf[MLDouble].getArray())
     val v0s: DenseMatrix[Double] =  new DenseMatrix(v0.rows,v0.cols, mfr.getMLArray("v0").asInstanceOf[MLDouble].getArray())
     U := Us
     V := Vs
+    //u0 := u0s
     v0 := v0s
+  }
+  
+  def exportResult(filename: String, userList: IndexedSeq[Int], itemList: IndexedSeq[Int]): Unit = {
+    val Ptotal = DenseMatrix.zeros[Double](rows, cols)
+    val Pmax = DenseMatrix.zeros[Double](rows, cols)
+    for (i<- 0 until size) {
+        val Q = (U.t * V(i*dimension until (i+1)*dimension, ::))
+        //Q(::, *) += u0(i, ::).t
+        Q(*, ::) += v0(i, ::).t
+        val Qexp = exp(Q)
+        if (i == (size - 1))
+          Pmax := Qexp
+    	Ptotal += Qexp
+    }
+    Pmax /= Ptotal
+    val Pselected: DenseMatrix[Double] = Pmax(userList, itemList).toDenseMatrix
+    import com.jmatio.io._
+    import com.jmatio.types._
+    import java.util.ArrayList
+    val list = new ArrayList[MLArray]()
+    list.add(new MLDouble("pmax", Pselected.data, Pselected.rows))
+    println("export pmax to " + filename + " ... ")
+    new MatFileWriter(filename, list) 
+    println("[done]")
   }
 
   private def probQ(i: Int, j: Int, theta: Double, cutoff: Int): (Int, Double) = {
@@ -276,10 +295,23 @@ class discreteMF (val dimension: Int, val size: Int,
     
     // Importance sampling to estimate L_{m} and L_{m-1}
     val sampleSize = 1000
+    
+    import com.jmatio.io._
+    import com.jmatio.types._
+    import java.util.ArrayList
+    
+    val list = new ArrayList[MLArray]()
+    
+    val pscore = itemList.map(prob(user, _)(size - 1)).toArray
+    val escore = itemList.map(predict(user, _)).toArray
+    list.add(new MLDouble("pscore", pscore, pscore.length))
+    list.add(new MLDouble("escore", escore, escore.length))
+    new MatFileWriter("userana.mat", list) 
+
     val pA = itemList.map(prob(user, _)(size - 1)).sum / N
     val pB = pA + itemList.map(prob(user, _)(size - 2)).sum / N
     val value: Double = k.toDouble / N.toDouble
-    val thetaA = 0.8 * log ((1 - pA) * (1 - value) / ( pA * value)) // rescale
+    val thetaA = 0.77 * log ((1 - pA) * (1 - value) / ( pA * value)) // rescale
     val thetaB = thetaA // 0.9 * log ((1 - pB) * (1 - value) / ( pB * value)) // rescale
     
     val eA = for (i<- 0 until sampleSize) yield {
@@ -325,15 +357,15 @@ object discreteMFrun {
     val B = getList("train_vec.txt")
     val tB= getList("probe_vec.txt")
     val dmf = new discreteMF(10, 7, B, tB)
-    
+
     dmf.solve()    
-    dmf.save("DPMF.mat")    
-    
+    dmf.save("DPMF.mat")   
     
     dmf.load("DPMF.mat")
     dmf.test(tB)
+    dmf.exportResult("DPMFresult.mat", 1 until dmf.rows, 1 until dmf.cols)
     
-    dmf.topk(30, 10)
+    dmf.topk(10, 10)
     
   }
 }
