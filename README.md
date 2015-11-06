@@ -1,5 +1,6 @@
-# Discrete Martrix Factorizatin with Cramer Risk Minimization
+# Discrete Martrix Factorizatin with Cramer Risk Minimization [![DOI](https://zenodo.org/badge/19103/bobye/dmfCramer.svg)](https://zenodo.org/badge/latestdoi/19103/bobye/dmfCramer)
 Jianbo Ye (c) 2014-2015
+
 
 This is an experimental code.
 Input 
